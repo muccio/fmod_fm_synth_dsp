@@ -1,0 +1,61 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact_name: fmod_square_dsp-macos-universal
+            binary_file: fmod_square_dsp.dylib
+            cmake_flags: -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          - os: windows-latest
+            artifact_name: fmod_square_dsp-windows-x64
+            binary_file: fmod_square_dsp.dll
+            cmake_flags: -A x64
+          - os: ubuntu-latest
+            artifact_name: fmod_square_dsp-linux-x64
+            binary_file: fmod_square_dsp.so
+            cmake_flags: ""
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_flags }}
+
+      - name: Build shared library
+        run: |
+          cmake --build build --config Release
+
+      - name: Prepare Artifact Package
+        shell: bash
+        run: |
+          mkdir -p package
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            find build -name "fmod_square_dsp.dll" -exec cp {} package/ \;
+          else
+            find build -name "${{ matrix.binary_file }}" -exec cp {} package/ \;
+          fi
+          cp fmod_studio/SquareWaveDSP.plugin.xml package/
+          cp README.md package/
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: package/

@@ -24,6 +24,7 @@ set(FMOD_INC_SEARCH_PATHS
     "${FMOD_SDK_DIR}/api/core/inc"
     "${FMOD_SDK_DIR}/api/core/include"
     "${FMOD_SDK_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/fmod"
 )
 
 find_path(FMOD_INCLUDE_DIR
