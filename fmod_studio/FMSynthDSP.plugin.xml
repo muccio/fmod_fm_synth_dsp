@@ -2,44 +2,44 @@
 <!--
     =============================================================================
     FMOD Studio DSP Plugin Metadata & Mixer Deck Definition
-    Plugin: Square Wave Generator (SquareWaveDSP)
+    Plugin: FM Synthesizer (FMSynthDSP)
     =============================================================================
     This XML descriptor defines the authoring metadata and GUI deck controls
     for FMOD Studio. It maps parameters to mixer knobs/sliders with appropriate
     display scales, units, and ranges matching the native C++ DSP description.
 -->
-<plugin name="Square Wave Generator"
-        identifier="SquareWaveDSP"
+<plugin name="FM Synthesizer"
+        identifier="FMSynthDSP"
         version="1.0.0"
         author="Senior Audio Programmer"
         category="Generator"
         type="dsp">
 
     <description>
-        Real-time square wave synthesizer for FMOD Core &amp; FMOD Studio.
-        Generates clean bipolar square waves with lock-free atomic parameter modulation.
+        Real-time 2-operator Frequency Modulation (FM) Synthesizer for FMOD Core &amp; FMOD Studio.
+        Features carrier frequency, C:M harmonicity ratio, modulation index, and lock-free parameter control.
     </description>
 
     <!-- Native library binary references across platforms -->
-    <binary win="fmod_square_dsp.dll"
-            mac="fmod_square_dsp.dylib"
-            linux="fmod_square_dsp.so" />
+    <binary win="fmod_fm_synth_dsp.dll"
+            mac="fmod_fm_synth_dsp.dylib"
+            linux="fmod_fm_synth_dsp.so" />
 
     <!-- Audio I/O Configuration -->
     <channels inputs="0" outputs="2" format="stereo" />
 
     <!-- Exposed Parameters Definition -->
     <parameters>
-        <!-- Parameter Index 0: Frequency -->
+        <!-- Parameter Index 0: Carrier Frequency -->
         <parameter index="0"
-                   name="Frequency"
+                   name="Carrier Freq"
                    type="float"
                    unit="Hz"
                    min="20.0"
                    max="20000.0"
                    default="440.0"
                    scale="logarithmic">
-            <control type="dial" label="Frequency" />
+            <control type="dial" label="Carrier Freq" />
             <display format="float" decimals="1" suffix=" Hz" />
             <!-- Piecewise logarithmic curve to match human pitch perception -->
             <mapping type="piecewise_linear">
@@ -54,11 +54,39 @@
                 <point value="10000.0" position="0.900" />
                 <point value="20000.0" position="1.000" />
             </mapping>
-            <tooltip>Oscillator fundamental frequency in Hertz (20.0 Hz to 20,000.0 Hz)</tooltip>
+            <tooltip>Carrier oscillator fundamental frequency in Hertz (20.0 Hz to 20,000.0 Hz)</tooltip>
         </parameter>
 
-        <!-- Parameter Index 1: Volume -->
+        <!-- Parameter Index 1: Modulator Ratio -->
         <parameter index="1"
+                   name="Mod Ratio"
+                   type="float"
+                   unit="x"
+                   min="0.1"
+                   max="16.0"
+                   default="1.0"
+                   scale="linear">
+            <control type="dial" label="Mod Ratio" />
+            <display format="float" decimals="2" suffix=" x" />
+            <tooltip>Frequency ratio between modulator and carrier operator (fm = fc * ratio)</tooltip>
+        </parameter>
+
+        <!-- Parameter Index 2: Modulation Index -->
+        <parameter index="2"
+                   name="Mod Index"
+                   type="float"
+                   unit=""
+                   min="0.0"
+                   max="20.0"
+                   default="2.0"
+                   scale="linear">
+            <control type="dial" label="Mod Index" />
+            <display format="float" decimals="2" />
+            <tooltip>Modulation index depth controlling timbre brightness and harmonic richness</tooltip>
+        </parameter>
+
+        <!-- Parameter Index 3: Volume -->
+        <parameter index="3"
                    name="Volume"
                    type="float"
                    unit=""
@@ -75,14 +103,26 @@
     <!-- FMOD Studio Mixer Deck Customization -->
     <deck layout="horizontal">
         <widget parameterIndex="0"
-                width="110"
-                height="130"
+                width="90"
+                height="120"
                 style="rotary_knob"
                 showReadout="true" />
 
         <widget parameterIndex="1"
-                width="70"
-                height="130"
+                width="90"
+                height="120"
+                style="rotary_knob"
+                showReadout="true" />
+
+        <widget parameterIndex="2"
+                width="90"
+                height="120"
+                style="rotary_knob"
+                showReadout="true" />
+
+        <widget parameterIndex="3"
+                width="60"
+                height="120"
                 style="vertical_slider"
                 showReadout="true" />
     </deck>

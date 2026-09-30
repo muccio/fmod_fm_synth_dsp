@@ -18,16 +18,16 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            artifact_name: fmod_square_dsp-macos-universal
-            binary_file: fmod_square_dsp.dylib
+            artifact_name: fmod_fm_synth_dsp-macos-universal
+            binary_file: fmod_fm_synth_dsp.dylib
             cmake_flags: -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
           - os: windows-latest
-            artifact_name: fmod_square_dsp-windows-x64
-            binary_file: fmod_square_dsp.dll
+            artifact_name: fmod_fm_synth_dsp-windows-x64
+            binary_file: fmod_fm_synth_dsp.dll
             cmake_flags: -A x64
           - os: ubuntu-latest
-            artifact_name: fmod_square_dsp-linux-x64
-            binary_file: fmod_square_dsp.so
+            artifact_name: fmod_fm_synth_dsp-linux-x64
+            binary_file: fmod_fm_synth_dsp.so
             cmake_flags: ""
 
     steps:
@@ -47,12 +47,12 @@ jobs:
         run: |
           mkdir -p package
           if [ "${{ runner.os }}" = "Windows" ]; then
-            find build -name "fmod_square_dsp.dll" -exec cp {} package/ \;
+            find build -name "fmod_fm_synth_dsp.dll" -exec cp {} package/ \;
           else
             find build -name "${{ matrix.binary_file }}" -exec cp {} package/ \;
           fi
-          cp fmod_studio/SquareWaveDSP.plugin.xml package/
-          cp fmod_studio/SquareWaveDSP.plugin.js package/
+          cp fmod_studio/FMSynthDSP.plugin.xml package/
+          cp fmod_studio/FMSynthDSP.plugin.js package/
           cp README.md package/
 
       - name: Upload Build Artifact

@@ -1,277 +1,235 @@
-# FMOD Core DSP: Square Wave Generator (`fmod_square_dsp`)
+# FMOD FM Synthesizer DSP Plugin (`fmod_fm_synth_dsp`)
 
-Plugin DSP generatore di onde quadre mono/stereo in C++17 ad alte prestazioni per **FMOD Core Engine** e **FMOD Studio**. Progettato secondo i più rigorosi standard del real-time audio programming: thread-safety lock-free, zero allocazioni dinamiche nel render thread, interpolazione logaritmica della frequenza ed export nativo multi-piattaforma (Windows `.dll`, macOS `.dylib`, Linux `.so`).
+A high-performance, real-time 2-operator **Frequency Modulation (FM) Synthesizer DSP Plugin** for **FMOD Core Engine** and **FMOD Studio 2.x**.
 
----
-
-## Indice
-1. [Architettura Tecnica](#architettura-tecnica)
-2. [Struttura del Repository](#struttura-del-repository)
-3. [Prerequisiti di Sistema](#prerequisiti-di-sistema)
-4. [Compilazione da Terminale (CLI)](#compilazione-da-terminale-cli)
-   - [Windows (MSVC / Visual Studio)](#1-windows-msvc--visual-studio-20192022)
-   - [macOS (Clang / Apple Silicon o Intel)](#2-macos-clang--apple-silicon-o-intel)
-   - [Linux (GCC / Clang)](#3-linux-gcc-o-clang)
-   - [Output Attesi](#output-dei-binari-compilati)
-5. [Installazione e Configurazione in FMOD Studio](#installazione-e-configurazione-in-fmod-studio)
-6. [Integrazione Runtime in C++ / Game Engine](#integrazione-runtime-in-c--game-engine)
-7. [Specifiche dei Parametri](#specifiche-dei-parametri)
+Designed for game audio, procedural sound design, and interactive audio systems, this plugin generates rich dynamic timbres ranging from pure sine tones and warm electric pianos to metallic bells, organs, basses, and harsh sci-fi textures.
 
 ---
 
-## Architettura Tecnica
+## 🎛️ Mathematical Model & Synthesis Architecture
 
-- **Sintesi Real-Time Safe:** L'algoritmo sintetizza un'onda quadra bipolare pura $\in [-\text{Vol}, +\text{Vol}]$ mediante un accumulatore di fase normalizzato nell'intervallo $[0.0, 1.0)$.
-- **Zero Allocazioni e Lock-Free:** Nessuna chiamata a `new`/`malloc`, chiamate di sistema o primitive bloccanti (`std::mutex`, `std::condition_variable`) all'interno del callback `SquareWaveDSP_Process`.
-- **Sincronizzazione Atomica:** I parametri (`Frequency` e `Volume`) vengono scambiati tra thread principale (GUI FMOD Studio, thread logico di gioco) e thread audio a bassa latenza tramite `std::atomic<float>` con semantica `memory_order_relaxed`.
-- **Mappatura Logaritmica:** La frequenza (20.0 Hz – 20,000.0 Hz) adotta una mappatura a tratti (`FMOD_DSP_PARAMETER_FLOAT_MAPPING_PIECEWISE_LINEAR`) per garantire una percezione musicale naturale e uniforme sull'escursione dei controlli UI.
-- **Supporto Mono, Stereo e Multicanale:** Scrittura diretta nei buffer interleaved di output per tutti i canali configurati dalla pipeline FMOD.
+The plugin implements classic Chowning 2-operator phase modulation synthesis:
+
+$$s(t) = V \cdot \sin\Big(2\pi f_c t + I \cdot \sin(2\pi f_m t)\Big)$$
+
+where:
+- $f_c$ = **Carrier Frequency** (frequenza fondamentale della portante in Hz)
+- $R$ = **Modulator Ratio** ($f_m / f_c$, rapporto armonico C:M)
+- $f_m = f_c \times R$ = **Modulator Frequency** (frequenza dell'operatore modulante)
+- $I$ = **Modulation Index** ($\beta$, profondità di modulazione)
+- $V$ = **Volume** (ampiezza di uscita lineare)
+
+### Real-Time Audio Guarantees
+- **Lock-Free Parameter Synchronization**: Parameters are exchanged between the main/UI thread and the real-time audio thread using `std::atomic<float>` with `std::memory_order_relaxed`.
+- **Zero Heap Allocations in Audio Thread**: No calls to `malloc`, `free`, `new`, or `delete` in the DSP process callback.
+- **Continuous Synthesis on Idle Buses**: Implements `SquareWaveDSP_ShouldIProcess` / `FMSynthDSP_ShouldIProcess` returning `FMOD_OK` unconditionally, ensuring audio continues to render even when inserted on an idle mixer bus or stopped track.
+- **Multi-Channel Routing**: Correctly maps stereo and surround speaker channels and masks during `FMOD_DSP_PROCESS_QUERY`.
 
 ---
 
-## Struttura del Repository
+## 📊 Parameters
 
-```text
-fmod_square_dsp/
-├── CMakeLists.txt                      # Build system CMake multipiattaforma (C++17)
+| Index | Parameter Name | Range | Default | Scale | Description |
+| :---: | :--- | :---: | :---: | :---: | :--- |
+| `0` | **Carrier Freq** | 20.0 Hz – 20,000.0 Hz | 440.0 Hz | Logarithmic | Frequenza fondamentale dell'onda portante |
+| `1` | **Mod Ratio** | 0.10 – 16.00 | 1.00 | Lineare | Rapporto di frequenza $f_m / f_c$ (C:M) |
+| `2` | **Mod Index** | 0.00 – 20.00 | 2.00 | Lineare | Indice di modulazione (brillantezza e bande laterali) |
+| `3` | **Volume** | 0.00 – 1.00 | 0.20 | Lineare / dB | Guadagno lineare di uscita |
+
+### Guida Sonora ai Rapporti di Frequenza (Mod Ratio)
+- **$R = 1.00$**: Spettro armonico fondamentale caldo (organo, ottoni morbidi).
+- **$R = 2.00$**: Onde quadre/dente di sega ricche di armoniche (bassi acidi, synth lead).
+- **$R = 3.00, 4.00, 5.00$**: Timbre metallici chiari, campane tubolari.
+- **$R = 1.414, 2.718$ (Inarmonico)**: Gongs, piatti, campane tibetane, rumori metallici e suoni fantascientifici.
+- **$I = 0.00$**: Genera una pura onda sinusoidale a frequenza $f_c$. Aumentando $I$, compaiono le bande laterali di Bessel che arricchiscono il timbro.
+
+---
+
+## 📁 Struttura della Repository
+
+```
+fmod_fm_synth_dsp/
+├── CMakeLists.txt                      # Build system multipiattaforma (C++17)
 ├── include/
-│   └── SquareWaveDSP.h                 # Dichiarazione classe DSP, parametri e callback C API
+│   ├── FMSynthDSP.h                    # Dichiarazione classe DSP ed export C
+│   └── fmod/                           # Header ufficiali FMOD Core
+│       ├── fmod.h
+│       ├── fmod.hpp
+│       ├── fmod_common.h
+│       └── fmod_dsp.h
 ├── src/
-│   └── SquareWaveDSP.cpp               # Implementazione DSP, logica di sintesi e symbol export
+│   └── FMSynthDSP.cpp                  # Implementazione sintesi FM & callbacks
 ├── fmod_studio/
-│   └── SquareWaveDSP.plugin.xml        # Definizione metadati e deck UI per FMOD Studio
-└── README.md                           # Guida completa di compilazione, uso e integrazione
+│   ├── FMSynthDSP.plugin.xml           # Descrittore metadata FMOD Studio
+│   └── FMSynthDSP.plugin.js            # UI Deck widget interattivo per FMOD Studio
+├── .github/workflows/
+│   └── build-and-release.yml           # CI/CD multipiattaforma per GitHub Releases
+└── README.md
 ```
 
 ---
 
-## Prerequisiti di Sistema
+## 🛠️ Compilazione da Riga di Comando (CLI)
 
-Prima di procedere, assicurati di avere a disposizione:
+### Prerequisiti
+- **CMake >= 3.20**
+- Compilatore C++17 supportato:
+  - **macOS**: Apple Clang (Xcode Command Line Tools)
+  - **Windows**: Microsoft Visual Studio 2019/2022 (MSVC)
+  - **Linux**: GCC >= 9 o Clang >= 10
 
-1. **Compilatore C++17:**
-   - **Windows:** Microsoft Visual C++ (MSVC) v142/v143 (Visual Studio 2019 o 2022 con workload "Desktop development with C++").
-   - **macOS:** Apple Clang (Xcode o Xcode Command Line Tools: `xcode-select --install`).
-   - **Linux:** GCC 9+ o Clang 10+.
-2. **CMake:** Versione $\ge 3.20$ ([cmake.org](https://cmake.org/download/)).
-3. **FMOD Engine / Core SDK:** Versione 2.0x, 2.1x, 2.2x o superiore scaricabile da [fmod.com/download](https://www.fmod.com/download).
-   - È necessario il percorso assoluto alla cartella dell'API contenente la sottocartella `inc` (o `include`) e le relative librerie (`lib/`).
+### macOS (Universal Binary: Apple Silicon arm64 + Intel x86_64)
+```bash
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+cmake --build build --config Release
+codesign -s - -f build/fmod_fm_synth_dsp.dylib
+```
+*Output binario:* `build/fmod_fm_synth_dsp.dylib`
 
----
-
-## Compilazione da Terminale (CLI)
-
-Il progetto utilizza la variabile CMake `FMOD_SDK_DIR` per localizzare l'SDK di FMOD.
-
-### 1. Windows (MSVC / Visual Studio 2019/2022)
-
-Apri il **x64 Native Tools Command Prompt for VS** (o PowerShell) e posizionati nella cartella radice:
-
+### Windows (MSVC x64)
 ```cmd
-:: Configurazione con generatore Visual Studio 17 2022
-cmake -B build -S . -G "Visual Studio 17 2022" -A x64 ^
-      -DFMOD_SDK_DIR="C:/Program Files (x86)/FMOD SoundSystem/FMOD Studio API Windows" ^
-      -DCMAKE_BUILD_TYPE=Release
-
-:: Compilazione della DLL Release
+cmake -B build -S . -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ```
+*Output binario:* `build/Release/fmod_fm_synth_dsp.dll`
 
-*In alternativa con Ninja:*
-```cmd
-cmake -B build -S . -G "Ninja" -DCMAKE_BUILD_TYPE=Release ^
-      -DFMOD_SDK_DIR="C:/Path/To/FMOD_SDK"
-cmake --build build
-```
-
-### 2. macOS (Clang / Apple Silicon o Intel)
-
-Apri il terminale di macOS e lancia:
-
+### Linux (x86_64)
 ```bash
-# Configurazione con Release flags (-O3, -ffast-math)
-cmake -B build -S . \
-      -DFMOD_SDK_DIR="/Users/condivisa/FMOD_Programmer_API/api/core" \
-      -DCMAKE_BUILD_TYPE=Release
-
-# Compilazione
-cmake --build build --config Release -j$(sysctl -n hw.ncpu)
-```
-
-Per generare un binario universale (x86_64 + arm64):
-```bash
-cmake -B build -S . \
-      -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
-      -DFMOD_SDK_DIR="/Percorso/FMOD_API" \
-      -DCMAKE_BUILD_TYPE=Release
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
-
-### 3. Linux (GCC o Clang)
-
-```bash
-# Configurazione
-cmake -B build -S . \
-      -DFMOD_SDK_DIR="/opt/fmod/api/core" \
-      -DCMAKE_BUILD_TYPE=Release
-
-# Compilazione
-cmake --build build --config Release -j$(nproc)
-```
-
-### Output dei Binari Compilati
-
-A compilazione ultimata, il file binario della libreria condivisa sarà generato nei seguenti percorsi:
-
-| Sistema Operativo | File Generato | Percorso Standard di Output |
-| :--- | :--- | :--- |
-| **Windows** | `fmod_square_dsp.dll` | `build/bin/Release/fmod_square_dsp.dll` o `build/Release/fmod_square_dsp.dll` |
-| **macOS** | `fmod_square_dsp.dylib` | `build/fmod_square_dsp.dylib` |
-| **Linux** | `fmod_square_dsp.so` | `build/fmod_square_dsp.so` |
+*Output binario:* `build/fmod_fm_synth_dsp.so`
 
 ---
 
-## Installazione e Configurazione in FMOD Studio
+## 📦 Installazione in FMOD Studio
 
-FMOD Studio carica i plugin DSP attraverso la sua cartella `Plugins`. Per esporre il plugin grafico nel Mixer Deck:
+Per utilizzare il plugin all'interno dell'interfaccia grafica di **FMOD Studio**:
 
-### 1. Copia dei File del Plugin
+### 1. Posizione dei File
 
-Copia il file binario compilato (`.dll`, `.dylib` o `.so`) e il file di metadati XML `fmod_studio/SquareWaveDSP.plugin.xml` nella directory dei plugin.
+Copia i 3 file del plugin:
+1. `fmod_fm_synth_dsp.dylib` (o `.dll` su Windows / `.so` su Linux)
+2. `fmod_studio/FMSynthDSP.plugin.xml`
+3. `fmod_studio/FMSynthDSP.plugin.js`
 
-#### Opzione A: Per Singolo Progetto FMOD Studio (Consigliata)
-Nella cartella del tuo progetto FMOD Studio, crea (se non esiste) la cartella `Plugins`:
-```text
-<MioProgettoFMOD>/
-├── MioProgettoFMOD.fspro
-├── Assets/
-├── Metadata/
-└── Plugins/
-    ├── fmod_square_dsp.dylib    (o .dll / .so)
-    ├── SquareWaveDSP.plugin.xml  (Metadati per Studio)
-    └── SquareWaveDSP.plugin.js   (Deck UI personalizzata per Studio)
+In una delle due posizioni seguenti:
+
+#### Opzione A: A livello di Progetto FMOD (Consigliato)
+Copia i file nella cartella `Plugins/` del tuo progetto:
+```
+<TuoProgettoFMOD>/Plugins/
+├── fmod_fm_synth_dsp.dylib
+├── FMSynthDSP.plugin.xml
+└── FMSynthDSP.plugin.js
 ```
 
-#### Opzione B: Installazione Globale per FMOD Studio
-- **Windows:** `%LOCALAPPDATA%/FMOD Studio/Plugins/` (oppure `%APPDATA%/FMOD Studio/Plugins/`)
-- **macOS:** `~/Library/Application Support/FMOD Studio/Plugins/`
-- **Linux:** `~/.local/share/FMOD Studio/Plugins/`
+#### Opzione B: A livello Globale per tutti i progetti
+- **macOS**: `~/Library/Application Support/FMOD Studio/Plugins/`
+- **Windows**: `%LOCALAPPDATA%\FMOD Studio\Plugins\`
+- **Linux**: `~/.local/share/FMOD Studio/Plugins/`
 
-### 2. Caricamento nel Mixer di FMOD Studio
-
-1. **Avvia FMOD Studio** e apri il tuo progetto.
-2. Apri la finestra **Mixer Routing** premendo `Ctrl+2` (Windows) o `Cmd+2` (macOS).
-3. Seleziona la traccia su cui applicare il generatore (es. una traccia audio dedicata in un evento, un **Audio Bus** di gruppo o il **Master Bus**).
-4. Nella vista **Deck** in basso:
-   - Fai click con il tasto destro nello spazio vuoto della catena effetti (a destra del Pan o prima del Fader).
-   - Seleziona **Add Effect** $\rightarrow$ **Plug-in Effects** $\rightarrow$ **Square Wave Generator**.
-5. Vedrai apparire il modulo del plugin nel Deck con i due controlli interattivi:
-   - **Manopola "Frequency"**: scala logaritmica da 20.0 Hz a 20,000.0 Hz (default 440.0 Hz).
-   - **Fader "Volume"**: scala di guadagno lineare da 0.0 a 1.0 (default 0.20).
-6. Premi la barra spaziatrice per avviare il monitoraggio e modulare frequenza e volume in tempo reale.
+### 2. Utilizzo nel Mixer di FMOD Studio
+1. Avvia **FMOD Studio** e apri il tuo progetto.
+2. Apri la vista **Mixer** (<kbd>F3</kbd> o <kbd>Cmd</kbd>+<kbd>2</kbd>).
+3. Seleziona una traccia o il **Master Bus**.
+4. Nella deck degli effetti in basso, fai clic destro e scegli:
+   **Add Effect** ➔ **FM Synthesizer**.
+5. Vedrai comparire i 4 controlli interattivi:
+   - Manopola **Carrier Freq** (20 Hz - 20 kHz)
+   - Manopola **Mod Ratio** (0.1x - 16x)
+   - Manopola **Mod Index** (0.0 - 20.0)
+   - Fader **Volume** (0.0 - 1.0)
+6. Il sintetizzatore inizierà a suonare in tempo reale!
 
 ---
 
-## Integrazione Runtime in C++ / Game Engine
+## 💻 Integrazione Run-Time C++ (FMOD Core)
 
-Il seguente listato C++17 è minimale e auto-consistente. Inizializza l'FMOD Core Engine, carica la libreria dinamica tramite `System::loadPlugin`, istanzia il DSP generatore, lo assegna al Master Channel Group e modula la frequenza a runtime.
+Di seguito un esempio minimale in C++17 che illustra come caricare la libreria dinamica del plugin a runtime, istanziare il DSP e modularne i parametri in un'applicazione o motore di gioco:
 
 ```cpp
-#include <fmod.hpp>
-#include <fmod_errors.h>
+#include "fmod.hpp"
+#include "fmod_errors.h"
 #include <iostream>
 #include <thread>
 #include <chrono>
 
-// Helper per il controllo errori FMOD
-#define FMOD_CHECK(result) \
-    do { \
-        FMOD_RESULT r = (result); \
-        if (r != FMOD_OK) { \
-            std::cerr << "[FMOD Error] " << FMOD_ErrorString(r) \
-                      << " at line " << __LINE__ << std::endl; \
-            return 1; \
-        } \
-    } while (0)
+void CheckError(FMOD_RESULT result, const char* functionName)
+{
+    if (result != FMOD_OK)
+    {
+        std::cerr << "Errore in " << functionName << ": " 
+                  << FMOD_ErrorString(result) << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+}
 
 int main()
 {
-    std::cout << "Inizializzazione FMOD Core Engine..." << std::endl;
-
     FMOD::System* system = nullptr;
-    FMOD_CHECK(FMOD::System_Create(&system));
+    CheckError(FMOD::System_Create(&system), "System_Create");
+    CheckError(system->init(32, FMOD_INIT_NORMAL, nullptr), "System::init");
 
-    // Inizializza FMOD con 32 canali virtuali
-    FMOD_CHECK(system->init(32, FMOD_INIT_NORMAL, nullptr));
-
-    // 1. Caricamento della libreria dinamica del plugin
+    // 1. Carica il plugin dinamico a runtime
 #if defined(_WIN32)
-    const char* pluginPath = "fmod_square_dsp.dll";
+    const char* pluginPath = "fmod_fm_synth_dsp.dll";
 #elif defined(__APPLE__)
-    const char* pluginPath = "fmod_square_dsp.dylib";
+    const char* pluginPath = "fmod_fm_synth_dsp.dylib";
 #else
-    const char* pluginPath = "./fmod_square_dsp.so";
+    const char* pluginPath = "fmod_fm_synth_dsp.so";
 #endif
 
     unsigned int pluginHandle = 0;
-    std::cout << "Caricamento plugin: " << pluginPath << std::endl;
-    FMOD_CHECK(system->loadPlugin(pluginPath, &pluginHandle, 0));
+    CheckError(system->loadPlugin(pluginPath, &pluginHandle, 0), "System::loadPlugin");
 
-    // 2. Creazione dell'istanza del DSP tramite l'handle del plugin
-    FMOD::DSP* squareWaveDSP = nullptr;
-    FMOD_CHECK(system->createDSPByPlugin(pluginHandle, &squareWaveDSP));
+    // 2. Istanzia il DSP dal plugin caricato
+    FMOD::DSP* fmSynthDSP = nullptr;
+    CheckError(system->createDSPByPlugin(pluginHandle, &fmSynthDSP), "System::createDSPByPlugin");
 
-    // 3. Connessione del DSP al Master Channel Group per la riproduzione
-    FMOD::ChannelGroup* masterGroup = nullptr;
-    FMOD_CHECK(system->getMasterChannelGroup(&masterGroup));
-    FMOD_CHECK(masterGroup->addDSP(0, squareWaveDSP));
+    // 3. Avvia la riproduzione del DSP sul Master Channel Group
+    FMOD::Channel* channel = nullptr;
+    CheckError(system->playDSP(fmSynthDSP, nullptr, false, &channel), "System::playDSP");
 
-    std::cout << "Generatore di onda quadra attivo!" << std::endl;
+    std::cout << "Riproduzione FM Synthesizer avviata a 440 Hz..." << std::endl;
 
-    // 4. Modulazione dinamica a runtime dei parametri:
-    // Parametro 0: Frequency (Hz)
-    // Parametro 1: Volume (0.0 - 1.0)
-    const float frequencies[] = { 220.0f, 440.0f, 659.25f, 880.0f }; // Note A3, A4, E5, A5
+    // 4. Modula i parametri a runtime (Carrier = 440Hz, Ratio = 2.0x, Index = 3.5)
+    fmSynthDSP->setParameterFloat(0, 440.0f); // Carrier Freq
+    fmSynthDSP->setParameterFloat(1, 2.0f);   // Mod Ratio (1:2)
+    fmSynthDSP->setParameterFloat(2, 3.5f);   // Mod Index
+    fmSynthDSP->setParameterFloat(3, 0.25f);  // Volume
 
-    for (float freq : frequencies)
+    // Suona per 2 secondi
+    for (int i = 0; i < 20; ++i)
     {
-        std::cout << "Impostazione frequenza a " << freq << " Hz..." << std::endl;
-        FMOD_CHECK(squareWaveDSP->setParameterFloat(0, freq));
-        FMOD_CHECK(squareWaveDSP->setParameterFloat(1, 0.15f)); // Volume moderato
-
-        // Aggiorna l'engine audio e attendi 1 secondo per ascoltare il tono
-        for (int i = 0; i < 20; ++i)
-        {
-            FMOD_CHECK(system->update());
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        }
+        system->update();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
-    // 5. Cleanup
-    std::cout << "Chiusura audio e rilascio risorse..." << std::endl;
-    FMOD_CHECK(masterGroup->removeDSP(squareWaveDSP));
-    FMOD_CHECK(squareWaveDSP->release());
-    FMOD_CHECK(system->unloadPlugin(pluginHandle));
-    FMOD_CHECK(system->close());
-    FMOD_CHECK(system->release());
+    // Passa a un timbro metallico inarmonico (Ratio = 1.414, Index = 6.0)
+    std::cout << "Modulazione timbro metallico inarmonico..." << std::endl;
+    fmSynthDSP->setParameterFloat(1, 1.414f);
+    fmSynthDSP->setParameterFloat(2, 6.0f);
 
-    std::cout << "Operazione completata con successo." << std::endl;
+    for (int i = 0; i < 30; ++i)
+    {
+        system->update();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    // Pulizia risorse
+    if (channel) channel->stop();
+    if (fmSynthDSP) fmSynthDSP->release();
+    system->unloadPlugin(pluginHandle);
+    system->close();
+    system->release();
+
     return 0;
 }
 ```
 
 ---
 
-## Specifiche dei Parametri
+## 📄 Licenza
 
-| Indice | Nome Parametro | Tipo | Range | Valore di Default | Mappatura / Scala | Descrizione |
-| :---: | :---: | :---: | :---: | :---: | :---: | :--- |
-| **0** | `Frequency` | `Float` | `20.0` - `20000.0` | `440.0` | Logaritmica (Hz) | Frequenza fondamentale dell'onda quadra. |
-| **1** | `Volume` | `Float` | `0.0` - `1.0` | `0.2` | Lineare / dB | Guadagno d'uscita del segnale sintetizzato. |
-
-### Entry Point per FMOD Core C API
-Il plugin esporta con C-linkage l'entry point universale:
-```cpp
-extern "C" F_EXPORT FMOD_DSP_DESCRIPTION* F_CALL FMODGetDSPDescription();
-```
-All'avvio, FMOD Core o FMOD Studio invoca questa funzione per interrogare le caratteristiche del DSP, allocare le strutture dei parametri ed eseguire il binding dei callback.
+Rilasciato sotto licenza MIT.

@@ -1,4 +1,4 @@
-#include "SquareWaveDSP.h"
+#include "FMSynthDSP.h"
 
 #include <cmath>
 #include <cstdio>
@@ -6,19 +6,23 @@
 
 namespace FMODPlugin {
 
-SquareWaveDSP::SquareWaveDSP() noexcept
-    : m_frequency(FREQ_DEFAULT)
+FMSynthDSP::FMSynthDSP() noexcept
+    : m_carrierFreq(CARRIER_FREQ_DEFAULT)
+    , m_modRatio(MOD_RATIO_DEFAULT)
+    , m_modIndex(MOD_INDEX_DEFAULT)
     , m_volume(VOL_DEFAULT)
-    , m_phase(0.0f)
+    , m_carrierPhase(0.0f)
+    , m_modulatorPhase(0.0f)
 {
 }
 
-void SquareWaveDSP::reset() noexcept
+void FMSynthDSP::reset() noexcept
 {
-    m_phase = 0.0f;
+    m_carrierPhase = 0.0f;
+    m_modulatorPhase = 0.0f;
 }
 
-void SquareWaveDSP::process(float* outBuffer, unsigned int length, int numChannels, int sampleRate) noexcept
+void FMSynthDSP::process(float* outBuffer, unsigned int length, int numChannels, int sampleRate) noexcept
 {
     if (!outBuffer || length == 0 || numChannels <= 0 || sampleRate <= 0)
     {
@@ -26,16 +30,28 @@ void SquareWaveDSP::process(float* outBuffer, unsigned int length, int numChanne
     }
 
     // Load atomic parameters once per audio block for consistent buffer processing
-    const float freq = m_frequency.load(std::memory_order_relaxed);
-    const float vol  = m_volume.load(std::memory_order_relaxed);
+    const float fc = m_carrierFreq.load(std::memory_order_relaxed);
+    const float ratio = m_modRatio.load(std::memory_order_relaxed);
+    const float index = m_modIndex.load(std::memory_order_relaxed);
+    const float vol = m_volume.load(std::memory_order_relaxed);
 
-    const float phaseIncrement = freq / static_cast<float>(sampleRate);
-    float phase = m_phase;
+    const float fm = fc * ratio;
+    const float invFs = 1.0f / static_cast<float>(sampleRate);
+    const float carrierPhaseInc = fc * invFs;
+    const float modPhaseInc = fm * invFs;
+
+    constexpr float TWO_PI = 6.28318530717958647692f;
+
+    float cPhase = m_carrierPhase;
+    float mPhase = m_modulatorPhase;
 
     for (unsigned int i = 0; i < length; ++i)
     {
-        // Pure bipolar square wave: +vol for first half of cycle [0.0, 0.5), -vol for second half [0.5, 1.0)
-        const float sample = (phase < 0.5f) ? vol : -vol;
+        // 1. Modulator oscillator output
+        const float modVal = std::sin(TWO_PI * mPhase);
+
+        // 2. Chowning FM Carrier synthesis: s(t) = Vol * sin(2*pi*fc*t + Index * sin(2*pi*fm*t))
+        const float sample = vol * std::sin(TWO_PI * cPhase + index * modVal);
 
         // Write sample to all configured output channels (interleaved format)
         const unsigned int frameOffset = i * static_cast<unsigned int>(numChannels);
@@ -44,44 +60,73 @@ void SquareWaveDSP::process(float* outBuffer, unsigned int length, int numChanne
             outBuffer[frameOffset + static_cast<unsigned int>(ch)] = sample;
         }
 
-        // Advance phase accumulator and wrap strictly within [0.0, 1.0)
-        phase += phaseIncrement;
-        if (phase >= 1.0f)
+        // Advance phase accumulators and wrap strictly within [0.0, 1.0)
+        cPhase += carrierPhaseInc;
+        if (cPhase >= 1.0f)
         {
-            phase -= std::floor(phase);
+            cPhase -= std::floor(cPhase);
+        }
+
+        mPhase += modPhaseInc;
+        if (mPhase >= 1.0f)
+        {
+            mPhase -= std::floor(mPhase);
         }
     }
 
-    m_phase = phase;
+    m_carrierPhase = cPhase;
+    m_modulatorPhase = mPhase;
 }
 
-void SquareWaveDSP::setFrequency(float freq) noexcept
+void FMSynthDSP::setCarrierFrequency(float freq) noexcept
 {
-    const float clamped = std::clamp(freq, FREQ_MIN, FREQ_MAX);
-    m_frequency.store(clamped, std::memory_order_relaxed);
+    const float clamped = std::clamp(freq, CARRIER_FREQ_MIN, CARRIER_FREQ_MAX);
+    m_carrierFreq.store(clamped, std::memory_order_relaxed);
 }
 
-float SquareWaveDSP::getFrequency() const noexcept
+float FMSynthDSP::getCarrierFrequency() const noexcept
 {
-    return m_frequency.load(std::memory_order_relaxed);
+    return m_carrierFreq.load(std::memory_order_relaxed);
 }
 
-void SquareWaveDSP::setVolume(float vol) noexcept
+void FMSynthDSP::setModulatorRatio(float ratio) noexcept
+{
+    const float clamped = std::clamp(ratio, MOD_RATIO_MIN, MOD_RATIO_MAX);
+    m_modRatio.store(clamped, std::memory_order_relaxed);
+}
+
+float FMSynthDSP::getModulatorRatio() const noexcept
+{
+    return m_modRatio.load(std::memory_order_relaxed);
+}
+
+void FMSynthDSP::setModulationIndex(float index) noexcept
+{
+    const float clamped = std::clamp(index, MOD_INDEX_MIN, MOD_INDEX_MAX);
+    m_modIndex.store(clamped, std::memory_order_relaxed);
+}
+
+float FMSynthDSP::getModulationIndex() const noexcept
+{
+    return m_modIndex.load(std::memory_order_relaxed);
+}
+
+void FMSynthDSP::setVolume(float vol) noexcept
 {
     const float clamped = std::clamp(vol, VOL_MIN, VOL_MAX);
     m_volume.store(clamped, std::memory_order_relaxed);
 }
 
-float SquareWaveDSP::getVolume() const noexcept
+float FMSynthDSP::getVolume() const noexcept
 {
     return m_volume.load(std::memory_order_relaxed);
 }
 
-FMOD_RESULT SquareWaveDSP::getInfo(char* outName, unsigned int* outVersion, int* outChannels, int* outConfigWidth, int* outConfigHeight) const noexcept
+FMOD_RESULT FMSynthDSP::getInfo(char* outName, unsigned int* outVersion, int* outChannels, int* outConfigWidth, int* outConfigHeight) const noexcept
 {
     if (outName)
     {
-        std::strncpy(outName, "Square Wave Generator", 32);
+        std::strncpy(outName, "FM Synthesizer", 32);
         outName[31] = '\0';
     }
     if (outVersion)
@@ -111,12 +156,16 @@ FMOD_RESULT SquareWaveDSP::getInfo(char* outName, unsigned int* outVersion, int*
 static float gFreqValues[]    = { 20.0f, 50.0f, 100.0f, 200.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 10000.0f, 20000.0f };
 static float gFreqPositions[] = { 0.000f, 0.133f, 0.233f, 0.333f, 0.466f, 0.566f, 0.667f, 0.799f, 0.900f, 1.000f };
 
-static FMOD_DSP_PARAMETER_DESC gParamFreq;
-static FMOD_DSP_PARAMETER_DESC gParamVol;
+static FMOD_DSP_PARAMETER_DESC gParamCarrierFreq;
+static FMOD_DSP_PARAMETER_DESC gParamModRatio;
+static FMOD_DSP_PARAMETER_DESC gParamModIndex;
+static FMOD_DSP_PARAMETER_DESC gParamVolume;
 
 static FMOD_DSP_PARAMETER_DESC* gParamArray[FMODPlugin::NUM_PARAMETERS] = {
-    &gParamFreq,
-    &gParamVol
+    &gParamCarrierFreq,
+    &gParamModRatio,
+    &gParamModIndex,
+    &gParamVolume
 };
 
 static bool gParamsInitialized = false;
@@ -128,23 +177,45 @@ static void InitPluginParameters()
         return;
     }
 
-    // Parameter 0: Frequency (Logarithmic piecewise mapping)
+    // Parameter 0: Carrier Frequency (Logarithmic piecewise mapping)
     FMOD_DSP_INIT_PARAMDESC_FLOAT_WITH_MAPPING(
-        gParamFreq,
-        "Frequency",
+        gParamCarrierFreq,
+        "Carrier Freq",
         "Hz",
-        "Fundamental frequency of the square wave in Hertz (logarithmic mapping)",
-        FMODPlugin::FREQ_DEFAULT,
+        "Fundamental frequency of the carrier operator in Hertz",
+        FMODPlugin::CARRIER_FREQ_DEFAULT,
         gFreqValues,
         gFreqPositions
     );
 
-    // Parameter 1: Volume (Linear mapping)
+    // Parameter 1: Modulator Ratio (Linear mapping)
     FMOD_DSP_INIT_PARAMDESC_FLOAT(
-        gParamVol,
+        gParamModRatio,
+        "Mod Ratio",
+        "x",
+        "Frequency ratio between modulator and carrier operator (fm = fc * ratio)",
+        FMODPlugin::MOD_RATIO_MIN,
+        FMODPlugin::MOD_RATIO_MAX,
+        FMODPlugin::MOD_RATIO_DEFAULT
+    );
+
+    // Parameter 2: Modulation Index (Linear mapping)
+    FMOD_DSP_INIT_PARAMDESC_FLOAT(
+        gParamModIndex,
+        "Mod Index",
+        "",
+        "Modulation index controlling harmonic richness and brightness",
+        FMODPlugin::MOD_INDEX_MIN,
+        FMODPlugin::MOD_INDEX_MAX,
+        FMODPlugin::MOD_INDEX_DEFAULT
+    );
+
+    // Parameter 3: Volume (Linear mapping)
+    FMOD_DSP_INIT_PARAMDESC_FLOAT(
+        gParamVolume,
         "Volume",
         "",
-        "Output signal linear volume (0.0 to 1.0)",
+        "Output signal linear amplitude volume (0.0 to 1.0)",
         FMODPlugin::VOL_MIN,
         FMODPlugin::VOL_MAX,
         FMODPlugin::VOL_DEFAULT
@@ -153,29 +224,29 @@ static void InitPluginParameters()
     gParamsInitialized = true;
 }
 
-static FMOD_DSP_DESCRIPTION gSquareWaveDSPDesc = {
+static FMOD_DSP_DESCRIPTION gFMSynthDSPDesc = {
     FMOD_PLUGIN_SDK_VERSION,                // pluginsdkversion
-    "Square Wave Generator",                // name
+    "FM Synthesizer",                       // name
     0x00010000,                             // version (1.0.0)
     1,                                      // numinputbuffers (1 allows insertion into tracks/buses in FMOD Studio)
     1,                                      // numoutputbuffers (1 output buffer)
-    SquareWaveDSP_Create,                   // create
-    SquareWaveDSP_Release,                  // release
-    SquareWaveDSP_Reset,                    // reset
+    FMSynthDSP_Create,                      // create
+    FMSynthDSP_Release,                     // release
+    FMSynthDSP_Reset,                       // reset
     nullptr,                                // read (unused in modern FMOD in favor of process)
-    SquareWaveDSP_Process,                  // process
+    FMSynthDSP_Process,                     // process
     nullptr,                                // setposition
-    FMODPlugin::NUM_PARAMETERS,             // numparameters (2)
+    FMODPlugin::NUM_PARAMETERS,             // numparameters (4)
     gParamArray,                            // paramdesc
-    SquareWaveDSP_SetParameterFloat,        // setparameterfloat
+    FMSynthDSP_SetParameterFloat,           // setparameterfloat
     nullptr,                                // setparameterint
     nullptr,                                // setparameterbool
     nullptr,                                // setparameterdata
-    SquareWaveDSP_GetParameterFloat,        // getparameterfloat
+    FMSynthDSP_GetParameterFloat,           // getparameterfloat
     nullptr,                                // getparameterint
     nullptr,                                // getparameterbool
     nullptr,                                // getparameterdata
-    SquareWaveDSP_ShouldIProcess,           // shouldiprocess
+    FMSynthDSP_ShouldIProcess,              // shouldiprocess
     nullptr,                                // userdata
     nullptr,                                // sys_register
     nullptr,                                // sys_deregister
@@ -183,60 +254,8 @@ static FMOD_DSP_DESCRIPTION gSquareWaveDSPDesc = {
 };
 
 /*
- * C-linkage FMOD DSP Callbacks implementation
+ * Speaker Mode mapping helper
  */
-extern "C" {
-
-FMOD_RESULT F_CALL SquareWaveDSP_Create(FMOD_DSP_STATE* dsp_state)
-{
-    if (!dsp_state)
-    {
-        return FMOD_ERR_INVALID_PARAM;
-    }
-
-    auto* instance = new (std::nothrow) FMODPlugin::SquareWaveDSP();
-    if (!instance)
-    {
-        return FMOD_ERR_MEMORY;
-    }
-
-    dsp_state->plugindata = instance;
-    return FMOD_OK;
-}
-
-FMOD_RESULT F_CALL SquareWaveDSP_Release(FMOD_DSP_STATE* dsp_state)
-{
-    if (!dsp_state)
-    {
-        return FMOD_ERR_INVALID_PARAM;
-    }
-
-    auto* instance = static_cast<FMODPlugin::SquareWaveDSP*>(dsp_state->plugindata);
-    if (instance)
-    {
-        delete instance;
-        dsp_state->plugindata = nullptr;
-    }
-
-    return FMOD_OK;
-}
-
-FMOD_RESULT F_CALL SquareWaveDSP_Reset(FMOD_DSP_STATE* dsp_state)
-{
-    if (!dsp_state)
-    {
-        return FMOD_ERR_INVALID_PARAM;
-    }
-
-    auto* instance = static_cast<FMODPlugin::SquareWaveDSP*>(dsp_state->plugindata);
-    if (instance)
-    {
-        instance->reset();
-    }
-
-    return FMOD_OK;
-}
-
 static void GetSpeakerModeChannelsAndMask(FMOD_SPEAKERMODE mode, int& channels, FMOD_CHANNELMASK& mask)
 {
     switch (mode)
@@ -272,7 +291,62 @@ static void GetSpeakerModeChannelsAndMask(FMOD_SPEAKERMODE mode, int& channels, 
     }
 }
 
-FMOD_RESULT F_CALL SquareWaveDSP_ShouldIProcess(
+/*
+ * C-linkage FMOD DSP Callbacks implementation
+ */
+extern "C" {
+
+FMOD_RESULT F_CALL FMSynthDSP_Create(FMOD_DSP_STATE* dsp_state)
+{
+    if (!dsp_state)
+    {
+        return FMOD_ERR_INVALID_PARAM;
+    }
+
+    auto* instance = new (std::nothrow) FMODPlugin::FMSynthDSP();
+    if (!instance)
+    {
+        return FMOD_ERR_MEMORY;
+    }
+
+    dsp_state->plugindata = instance;
+    return FMOD_OK;
+}
+
+FMOD_RESULT F_CALL FMSynthDSP_Release(FMOD_DSP_STATE* dsp_state)
+{
+    if (!dsp_state)
+    {
+        return FMOD_ERR_INVALID_PARAM;
+    }
+
+    auto* instance = static_cast<FMODPlugin::FMSynthDSP*>(dsp_state->plugindata);
+    if (instance)
+    {
+        delete instance;
+        dsp_state->plugindata = nullptr;
+    }
+
+    return FMOD_OK;
+}
+
+FMOD_RESULT F_CALL FMSynthDSP_Reset(FMOD_DSP_STATE* dsp_state)
+{
+    if (!dsp_state)
+    {
+        return FMOD_ERR_INVALID_PARAM;
+    }
+
+    auto* instance = static_cast<FMODPlugin::FMSynthDSP*>(dsp_state->plugindata);
+    if (instance)
+    {
+        instance->reset();
+    }
+
+    return FMOD_OK;
+}
+
+FMOD_RESULT F_CALL FMSynthDSP_ShouldIProcess(
     FMOD_DSP_STATE* dsp_state,
     FMOD_BOOL inputsidle,
     unsigned int length,
@@ -291,7 +365,7 @@ FMOD_RESULT F_CALL SquareWaveDSP_ShouldIProcess(
     return FMOD_OK;
 }
 
-FMOD_RESULT F_CALL SquareWaveDSP_Process(
+FMOD_RESULT F_CALL FMSynthDSP_Process(
     FMOD_DSP_STATE* dsp_state,
     unsigned int length,
     const FMOD_DSP_BUFFER_ARRAY* inbufferarray,
@@ -362,7 +436,7 @@ FMOD_RESULT F_CALL SquareWaveDSP_Process(
             return FMOD_ERR_INVALID_PARAM;
         }
 
-        auto* instance = static_cast<FMODPlugin::SquareWaveDSP*>(dsp_state->plugindata);
+        auto* instance = static_cast<FMODPlugin::FMSynthDSP*>(dsp_state->plugindata);
         if (!instance)
         {
             return FMOD_ERR_INVALID_HANDLE;
@@ -401,14 +475,14 @@ FMOD_RESULT F_CALL SquareWaveDSP_Process(
     return FMOD_OK;
 }
 
-FMOD_RESULT F_CALL SquareWaveDSP_SetParameterFloat(FMOD_DSP_STATE* dsp_state, int index, float value)
+FMOD_RESULT F_CALL FMSynthDSP_SetParameterFloat(FMOD_DSP_STATE* dsp_state, int index, float value)
 {
     if (!dsp_state)
     {
         return FMOD_ERR_INVALID_PARAM;
     }
 
-    auto* instance = static_cast<FMODPlugin::SquareWaveDSP*>(dsp_state->plugindata);
+    auto* instance = static_cast<FMODPlugin::FMSynthDSP*>(dsp_state->plugindata);
     if (!instance)
     {
         return FMOD_ERR_INVALID_HANDLE;
@@ -416,8 +490,16 @@ FMOD_RESULT F_CALL SquareWaveDSP_SetParameterFloat(FMOD_DSP_STATE* dsp_state, in
 
     switch (index)
     {
-        case FMODPlugin::PARAM_FREQUENCY:
-            instance->setFrequency(value);
+        case FMODPlugin::PARAM_CARRIER_FREQ:
+            instance->setCarrierFrequency(value);
+            return FMOD_OK;
+
+        case FMODPlugin::PARAM_MOD_RATIO:
+            instance->setModulatorRatio(value);
+            return FMOD_OK;
+
+        case FMODPlugin::PARAM_MOD_INDEX:
+            instance->setModulationIndex(value);
             return FMOD_OK;
 
         case FMODPlugin::PARAM_VOLUME:
@@ -429,14 +511,14 @@ FMOD_RESULT F_CALL SquareWaveDSP_SetParameterFloat(FMOD_DSP_STATE* dsp_state, in
     }
 }
 
-FMOD_RESULT F_CALL SquareWaveDSP_GetParameterFloat(FMOD_DSP_STATE* dsp_state, int index, float* value, char* valuestr)
+FMOD_RESULT F_CALL FMSynthDSP_GetParameterFloat(FMOD_DSP_STATE* dsp_state, int index, float* value, char* valuestr)
 {
     if (!dsp_state || !value)
     {
         return FMOD_ERR_INVALID_PARAM;
     }
 
-    auto* instance = static_cast<FMODPlugin::SquareWaveDSP*>(dsp_state->plugindata);
+    auto* instance = static_cast<FMODPlugin::FMSynthDSP*>(dsp_state->plugindata);
     if (!instance)
     {
         return FMOD_ERR_INVALID_HANDLE;
@@ -444,13 +526,35 @@ FMOD_RESULT F_CALL SquareWaveDSP_GetParameterFloat(FMOD_DSP_STATE* dsp_state, in
 
     switch (index)
     {
-        case FMODPlugin::PARAM_FREQUENCY:
+        case FMODPlugin::PARAM_CARRIER_FREQ:
         {
-            const float f = instance->getFrequency();
+            const float f = instance->getCarrierFrequency();
             *value = f;
             if (valuestr)
             {
                 std::snprintf(valuestr, FMOD_DSP_GETPARAM_VALUESTR_LENGTH, "%.1f Hz", f);
+            }
+            return FMOD_OK;
+        }
+
+        case FMODPlugin::PARAM_MOD_RATIO:
+        {
+            const float r = instance->getModulatorRatio();
+            *value = r;
+            if (valuestr)
+            {
+                std::snprintf(valuestr, FMOD_DSP_GETPARAM_VALUESTR_LENGTH, "%.2f x", r);
+            }
+            return FMOD_OK;
+        }
+
+        case FMODPlugin::PARAM_MOD_INDEX:
+        {
+            const float idx = instance->getModulationIndex();
+            *value = idx;
+            if (valuestr)
+            {
+                std::snprintf(valuestr, FMOD_DSP_GETPARAM_VALUESTR_LENGTH, "%.2f", idx);
             }
             return FMOD_OK;
         }
@@ -471,7 +575,7 @@ FMOD_RESULT F_CALL SquareWaveDSP_GetParameterFloat(FMOD_DSP_STATE* dsp_state, in
     }
 }
 
-FMOD_RESULT F_CALL SquareWaveDSP_GetInfo(
+FMOD_RESULT F_CALL FMSynthDSP_GetInfo(
     FMOD_DSP_STATE* dsp_state,
     char* name,
     unsigned int* version,
@@ -481,13 +585,13 @@ FMOD_RESULT F_CALL SquareWaveDSP_GetInfo(
 {
     if (dsp_state && dsp_state->plugindata)
     {
-        auto* instance = static_cast<FMODPlugin::SquareWaveDSP*>(dsp_state->plugindata);
+        auto* instance = static_cast<FMODPlugin::FMSynthDSP*>(dsp_state->plugindata);
         return instance->getInfo(name, version, channels, configwidth, configheight);
     }
 
     if (name)
     {
-        std::strncpy(name, "Square Wave Generator", 32);
+        std::strncpy(name, "FM Synthesizer", 32);
         name[31] = '\0';
     }
     if (version)
@@ -512,7 +616,7 @@ FMOD_RESULT F_CALL SquareWaveDSP_GetInfo(
 F_EXPORT FMOD_DSP_DESCRIPTION* F_CALL FMODGetDSPDescription()
 {
     InitPluginParameters();
-    return &gSquareWaveDSPDesc;
+    return &gFMSynthDSPDesc;
 }
 
 } // extern "C"

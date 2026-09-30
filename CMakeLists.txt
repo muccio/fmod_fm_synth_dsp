@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(fmod_square_dsp VERSION 1.0.0 LANGUAGES CXX)
+project(fmod_fm_synth_dsp VERSION 1.0.0 LANGUAGES CXX)
 
 # Enforce C++17 Standard
 set(CMAKE_CXX_STANDARD 17)
@@ -42,54 +42,16 @@ else()
     message(STATUS "FMOD include directory trovata: ${FMOD_INCLUDE_DIR}")
 endif()
 
-# Platform-specific library search
-if(WIN32)
-    set(FMOD_LIB_NAMES fmod_vc fmod)
-    set(FMOD_LIB_SEARCH_PATHS
-        "${FMOD_SDK_DIR}/lib/x64"
-        "${FMOD_SDK_DIR}/lib"
-        "${FMOD_SDK_DIR}/api/core/lib/x64"
-        "${FMOD_SDK_DIR}/api/core/lib"
-    )
-elseif(APPLE)
-    set(FMOD_LIB_NAMES fmod libfmod)
-    set(FMOD_LIB_SEARCH_PATHS
-        "${FMOD_SDK_DIR}/lib/osx"
-        "${FMOD_SDK_DIR}/lib"
-        "${FMOD_SDK_DIR}/api/core/lib"
-    )
-elseif(UNIX)
-    set(FMOD_LIB_NAMES fmod libfmod)
-    set(FMOD_LIB_SEARCH_PATHS
-        "${FMOD_SDK_DIR}/lib/x86_64"
-        "${FMOD_SDK_DIR}/lib"
-        "${FMOD_SDK_DIR}/api/core/lib/x86_64"
-        "${FMOD_SDK_DIR}/api/core/lib"
-    )
-endif()
-
-find_library(FMOD_LIBRARY
-    NAMES ${FMOD_LIB_NAMES}
-    PATHS ${FMOD_LIB_SEARCH_PATHS}
-    DOC "Libreria binaria di FMOD Core"
-)
-
-if(FMOD_LIBRARY)
-    message(STATUS "Libreria FMOD Core trovata: ${FMOD_LIBRARY}")
-else()
-    message(WARNING "Libreria binaria FMOD non trovata. Il plugin verrà compilato senza linking diretto (risoluzione simboli a runtime tramite host).")
-endif()
-
 # ---------------------------------------------------------------------------
 # Target Definition: Shared Library
 # ---------------------------------------------------------------------------
-add_library(fmod_square_dsp SHARED
-    include/SquareWaveDSP.h
-    src/SquareWaveDSP.cpp
+add_library(fmod_fm_synth_dsp SHARED
+    include/FMSynthDSP.h
+    src/FMSynthDSP.cpp
 )
 
 # Header include paths
-target_include_directories(fmod_square_dsp
+target_include_directories(fmod_fm_synth_dsp
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     PRIVATE
@@ -101,22 +63,22 @@ target_include_directories(fmod_square_dsp
 # the audio engine and passes all runtime functions via FMOD_DSP_STATE pointers.
 
 # Target Properties & Symbol Visibility
-set_target_properties(fmod_square_dsp PROPERTIES
-    OUTPUT_NAME "fmod_square_dsp"
-    PREFIX "" # Generates clean filenames: fmod_square_dsp.dll / fmod_square_dsp.dylib / fmod_square_dsp.so
+set_target_properties(fmod_fm_synth_dsp PROPERTIES
+    OUTPUT_NAME "fmod_fm_synth_dsp"
+    PREFIX "" # Generates clean filenames: fmod_fm_synth_dsp.dll / fmod_fm_synth_dsp.dylib / fmod_fm_synth_dsp.so
     CXX_VISIBILITY_PRESET default
     VISIBILITY_INLINES_HIDDEN OFF
 )
 
 # Optimization Flags & Compiler Warnings
 if(MSVC)
-    target_compile_options(fmod_square_dsp PRIVATE
+    target_compile_options(fmod_fm_synth_dsp PRIVATE
         /W4
         $<$<CONFIG:Release>:/O2 /Oi /Ot /fp:fast>
         $<$<CONFIG:Debug>:/Od /Zi>
     )
 else()
-    target_compile_options(fmod_square_dsp PRIVATE
+    target_compile_options(fmod_fm_synth_dsp PRIVATE
         -Wall
         -Wextra
         -Wpedantic
@@ -126,14 +88,14 @@ else()
 endif()
 
 # Installation target
-install(TARGETS fmod_square_dsp
+install(TARGETS fmod_fm_synth_dsp
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
 )
 
 install(FILES
-    fmod_studio/SquareWaveDSP.plugin.xml
-    fmod_studio/SquareWaveDSP.plugin.js
+    fmod_studio/FMSynthDSP.plugin.xml
+    fmod_studio/FMSynthDSP.plugin.js
     DESTINATION fmod_studio
 )
