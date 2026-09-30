@@ -119,6 +119,12 @@ extern "C" {
                                             FMOD_DSP_BUFFER_ARRAY* outbufferarray,
                                             FMOD_BOOL inputsidle,
                                             FMOD_DSP_PROCESS_OPERATION op);
+    FMOD_RESULT F_CALL SquareWaveDSP_ShouldIProcess(FMOD_DSP_STATE* dsp_state,
+                                                   FMOD_BOOL inputsidle,
+                                                   unsigned int length,
+                                                   FMOD_CHANNELMASK inmask,
+                                                   int inchannels,
+                                                   FMOD_SPEAKERMODE speakermode);
     FMOD_RESULT F_CALL SquareWaveDSP_SetParameterFloat(FMOD_DSP_STATE* dsp_state, int index, float value);
     FMOD_RESULT F_CALL SquareWaveDSP_GetParameterFloat(FMOD_DSP_STATE* dsp_state, int index, float* value, char* valuestr);
     FMOD_RESULT F_CALL SquareWaveDSP_GetInfo(FMOD_DSP_STATE* dsp_state, char* name, unsigned int* version, int* channels, int* configwidth, int* configheight);

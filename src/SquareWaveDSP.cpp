@@ -175,7 +175,7 @@ static FMOD_DSP_DESCRIPTION gSquareWaveDSPDesc = {
     nullptr,                                // getparameterint
     nullptr,                                // getparameterbool
     nullptr,                                // getparameterdata
-    nullptr,                                // shouldiprocess
+    SquareWaveDSP_ShouldIProcess,           // shouldiprocess
     nullptr,                                // userdata
     nullptr,                                // sys_register
     nullptr,                                // sys_deregister
@@ -237,6 +237,60 @@ FMOD_RESULT F_CALL SquareWaveDSP_Reset(FMOD_DSP_STATE* dsp_state)
     return FMOD_OK;
 }
 
+static void GetSpeakerModeChannelsAndMask(FMOD_SPEAKERMODE mode, int& channels, FMOD_CHANNELMASK& mask)
+{
+    switch (mode)
+    {
+        case FMOD_SPEAKERMODE_MONO:
+            channels = 1;
+            mask = FMOD_CHANNELMASK_MONO;
+            break;
+        case FMOD_SPEAKERMODE_STEREO:
+            channels = 2;
+            mask = FMOD_CHANNELMASK_STEREO;
+            break;
+        case FMOD_SPEAKERMODE_QUAD:
+            channels = 4;
+            mask = FMOD_CHANNELMASK_QUAD;
+            break;
+        case FMOD_SPEAKERMODE_SURROUND:
+            channels = 5;
+            mask = FMOD_CHANNELMASK_SURROUND;
+            break;
+        case FMOD_SPEAKERMODE_5POINT1:
+            channels = 6;
+            mask = FMOD_CHANNELMASK_5POINT1;
+            break;
+        case FMOD_SPEAKERMODE_7POINT1:
+            channels = 8;
+            mask = FMOD_CHANNELMASK_7POINT1;
+            break;
+        default:
+            channels = 2;
+            mask = FMOD_CHANNELMASK_STEREO;
+            break;
+    }
+}
+
+FMOD_RESULT F_CALL SquareWaveDSP_ShouldIProcess(
+    FMOD_DSP_STATE* dsp_state,
+    FMOD_BOOL inputsidle,
+    unsigned int length,
+    FMOD_CHANNELMASK inmask,
+    int inchannels,
+    FMOD_SPEAKERMODE speakermode)
+{
+    (void)dsp_state;
+    (void)inputsidle;
+    (void)length;
+    (void)inmask;
+    (void)inchannels;
+    (void)speakermode;
+
+    // Continuous sound generator / synthesizer: always process even when inputs are idle
+    return FMOD_OK;
+}
+
 FMOD_RESULT F_CALL SquareWaveDSP_Process(
     FMOD_DSP_STATE* dsp_state,
     unsigned int length,
@@ -251,7 +305,8 @@ FMOD_RESULT F_CALL SquareWaveDSP_Process(
     {
         if (outbufferarray && outbufferarray->numbuffers > 0)
         {
-            int channels = 2; // Default to stereo
+            int channels = 2;
+            FMOD_CHANNELMASK channelMask = FMOD_CHANNELMASK_STEREO;
             FMOD_SPEAKERMODE speakerMode = FMOD_SPEAKERMODE_STEREO;
 
             // Inherit input format if available from track/bus
@@ -260,25 +315,41 @@ FMOD_RESULT F_CALL SquareWaveDSP_Process(
             {
                 channels = inbufferarray->buffernumchannels[0];
                 speakerMode = inbufferarray->speakermode;
+                if (inbufferarray->bufferchannelmask && inbufferarray->bufferchannelmask[0] != 0)
+                {
+                    channelMask = inbufferarray->bufferchannelmask[0];
+                }
+                else
+                {
+                    GetSpeakerModeChannelsAndMask(speakerMode, channels, channelMask);
+                }
             }
-            else if (dsp_state && dsp_state->functions && dsp_state->functions->getspeakermode)
+            else
             {
                 // Query system speaker mode
-                FMOD_SPEAKERMODE mixerMode = FMOD_SPEAKERMODE_DEFAULT;
-                FMOD_SPEAKERMODE outputMode = FMOD_SPEAKERMODE_DEFAULT;
-                if (dsp_state->functions->getspeakermode(dsp_state, &mixerMode, &outputMode) == FMOD_OK)
+                if (dsp_state && dsp_state->functions && dsp_state->functions->getspeakermode)
                 {
-                    if (mixerMode != FMOD_SPEAKERMODE_DEFAULT && mixerMode != FMOD_SPEAKERMODE_RAW)
+                    FMOD_SPEAKERMODE mixerMode = FMOD_SPEAKERMODE_DEFAULT;
+                    FMOD_SPEAKERMODE outputMode = FMOD_SPEAKERMODE_DEFAULT;
+                    if (dsp_state->functions->getspeakermode(dsp_state, &mixerMode, &outputMode) == FMOD_OK)
                     {
-                        speakerMode = mixerMode;
+                        if (mixerMode > FMOD_SPEAKERMODE_DEFAULT && mixerMode < FMOD_SPEAKERMODE_MAX)
+                        {
+                            speakerMode = mixerMode;
+                        }
                     }
                 }
+                GetSpeakerModeChannelsAndMask(speakerMode, channels, channelMask);
             }
 
             outbufferarray->speakermode = speakerMode;
             if (outbufferarray->buffernumchannels)
             {
                 outbufferarray->buffernumchannels[0] = channels;
+            }
+            if (outbufferarray->bufferchannelmask)
+            {
+                outbufferarray->bufferchannelmask[0] = channelMask;
             }
         }
         return FMOD_OK;
