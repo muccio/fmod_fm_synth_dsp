@@ -96,10 +96,9 @@ target_include_directories(fmod_square_dsp
         ${FMOD_INCLUDE_DIR}
 )
 
-# Link FMOD Core library if present
-if(FMOD_LIBRARY)
-    target_link_libraries(fmod_square_dsp PRIVATE ${FMOD_LIBRARY})
-endif()
+# Note: FMOD DSP plugins are loaded dynamically at runtime by FMOD Studio or game engines.
+# Plugins must NOT link against libfmod directly, as the host application already provides
+# the audio engine and passes all runtime functions via FMOD_DSP_STATE pointers.
 
 # Target Properties & Symbol Visibility
 set_target_properties(fmod_square_dsp PROPERTIES
@@ -133,6 +132,8 @@ install(TARGETS fmod_square_dsp
     ARCHIVE DESTINATION lib
 )
 
-install(FILES fmod_studio/SquareWaveDSP.plugin.xml
+install(FILES
+    fmod_studio/SquareWaveDSP.plugin.xml
+    fmod_studio/SquareWaveDSP.plugin.js
     DESTINATION fmod_studio
 )

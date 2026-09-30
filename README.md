@@ -147,8 +147,9 @@ Nella cartella del tuo progetto FMOD Studio, crea (se non esiste) la cartella `P
 ├── Assets/
 ├── Metadata/
 └── Plugins/
-    ├── fmod_square_dsp.dylib (o .dll / .so)
-    └── SquareWaveDSP.plugin.xml
+    ├── fmod_square_dsp.dylib    (o .dll / .so)
+    ├── SquareWaveDSP.plugin.xml  (Metadati per Studio)
+    └── SquareWaveDSP.plugin.js   (Deck UI personalizzata per Studio)
 ```
 
 #### Opzione B: Installazione Globale per FMOD Studio

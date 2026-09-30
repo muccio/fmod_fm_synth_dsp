@@ -52,6 +52,7 @@ jobs:
             find build -name "${{ matrix.binary_file }}" -exec cp {} package/ \;
           fi
           cp fmod_studio/SquareWaveDSP.plugin.xml package/
+          cp fmod_studio/SquareWaveDSP.plugin.js package/
           cp README.md package/
 
       - name: Upload Build Artifact
